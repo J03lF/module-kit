@@ -12,6 +12,7 @@ use crate::tokens::{ModuleTokenExchangeRequest, ModuleTokenExchangeResponse};
 
 const TOKEN_ENDPOINT_PATH: &str = "modules/runtime/tokens";
 
+#[derive(Clone)]
 pub(crate) struct ControlPlaneClient {
     token_url: Url,
     http: BlockingClient,
