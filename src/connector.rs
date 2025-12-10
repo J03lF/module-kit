@@ -1,4 +1,3 @@
-use std::fs;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::Mutex;
@@ -7,19 +6,16 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
-use reqwest::blocking::Client as BlockingClient;
-use reqwest::{Certificate, Identity};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use url::Url;
 
-use crate::env::{ControlPlaneEnvironment, ModuleEnvironment};
+use crate::env::ModuleEnvironment;
 use crate::error::ModuleKitError;
-use crate::tokens::{ModuleTokenExchangeRequest, ModuleTokenExchangeResponse};
+use crate::tokens::ModuleTokenExchangeRequest;
+use crate::token_provider::ServiceTokenProvider;
 
 const CONNECTOR_TIMEOUT: Duration = Duration::from_secs(15);
 const WRITE_TOKEN_SAFETY_SECONDS: u64 = 5;
-const TOKEN_ENDPOINT_PATH: &str = "modules/runtime/tokens";
 
 #[derive(Debug, Clone)]
 pub enum ConnectorEndpoint {
@@ -224,8 +220,7 @@ pub enum DbConnectorResultView {
 
 pub struct DbConnectorClient {
     endpoint: ConnectorEndpoint,
-    default_token: String,
-    control_plane: Option<ControlPlaneClient>,
+    tokens: ServiceTokenProvider,
     cached_write_token: Mutex<Option<CachedToken>>,
 }
 
@@ -236,14 +231,10 @@ impl DbConnectorClient {
     }
 
     pub fn from_environment(env: ModuleEnvironment) -> Result<Self, ModuleKitError> {
-        let control_plane = match &env.control_plane.url {
-            Some(_) => Some(ControlPlaneClient::new(&env.control_plane)?),
-            None => None,
-        };
+        let tokens = env.token_provider()?;
         Ok(Self {
             endpoint: env.connector,
-            default_token: env.service_token,
-            control_plane,
+            tokens,
             cached_write_token: Mutex::new(None),
         })
     }
@@ -273,7 +264,7 @@ impl DbConnectorClient {
         if intent.requires_write_scope() {
             return self.fetch_write_token();
         }
-        Ok(self.default_token.clone())
+        self.tokens.current_token()
     }
 
     fn fetch_write_token(&self) -> Result<String, ModuleKitError> {
@@ -282,12 +273,9 @@ impl DbConnectorClient {
                 return Ok(token.token.clone());
             }
         }
-        let control = self
-            .control_plane
-            .as_ref()
-            .ok_or(ModuleKitError::ControlPlaneMissing)?;
-        let response =
-            control.exchange_token(&self.default_token, ModuleTokenExchangeRequest::db_write())?;
+        let response = self
+            .tokens
+            .issue_scoped_token(ModuleTokenExchangeRequest::db_write())?;
         let ttl = response
             .expires_in_seconds
             .saturating_sub(WRITE_TOKEN_SAFETY_SECONDS);
@@ -304,105 +292,4 @@ impl DbConnectorClient {
 struct CachedToken {
     token: String,
     expires_at: Instant,
-}
-
-struct ControlPlaneClient {
-    token_url: Url,
-    http: BlockingClient,
-    retries: u32,
-    backoff: Duration,
-}
-
-impl ControlPlaneClient {
-    fn new(env: &ControlPlaneEnvironment) -> Result<Self, ModuleKitError> {
-        let base_url = env
-            .url
-            .clone()
-            .ok_or_else(|| ModuleKitError::ControlPlaneMissing)?;
-        let normalized = ensure_trailing_slash(base_url);
-        let token_url = normalized
-            .join(TOKEN_ENDPOINT_PATH)
-            .map_err(ModuleKitError::ControlPlaneUrl)?;
-        let mut builder = BlockingClient::builder().timeout(env.timeout);
-        if env.tls.accept_invalid_certs {
-            builder = builder.danger_accept_invalid_certs(true);
-        }
-        if let Some(ca_path) = &env.tls.ca_cert_path {
-            let bytes = fs::read(ca_path).map_err(|err| {
-                ModuleKitError::Tls(format!("failed to read ca cert {ca_path}: {err}"))
-            })?;
-            let cert = Certificate::from_pem(&bytes)
-                .map_err(|err| ModuleKitError::Tls(format!("invalid ca cert {ca_path}: {err}")))?;
-            builder = builder.add_root_certificate(cert);
-        }
-        if let (Some(cert_path), Some(key_path)) =
-            (&env.tls.client_cert_path, &env.tls.client_key_path)
-        {
-            let mut identity_bytes = fs::read(cert_path).map_err(|err| {
-                ModuleKitError::Tls(format!("failed to read client cert {cert_path}: {err}"))
-            })?;
-            let key_bytes = fs::read(key_path).map_err(|err| {
-                ModuleKitError::Tls(format!("failed to read client key {key_path}: {err}"))
-            })?;
-            identity_bytes.extend_from_slice(&key_bytes);
-            let identity = Identity::from_pem(&identity_bytes).map_err(|err| {
-                ModuleKitError::Tls(format!(
-                    "invalid client identity ({cert_path},{key_path}): {err}"
-                ))
-            })?;
-            builder = builder.identity(identity);
-        }
-        let client = builder.build()?;
-        Ok(Self {
-            token_url,
-            http: client,
-            retries: env.retries,
-            backoff: env.backoff,
-        })
-    }
-
-    fn exchange_token(
-        &self,
-        bearer: &str,
-        request: ModuleTokenExchangeRequest,
-    ) -> Result<ModuleTokenExchangeResponse, ModuleKitError> {
-        let mut attempts = 0;
-        loop {
-            match self
-                .http
-                .post(self.token_url.clone())
-                .bearer_auth(bearer)
-                .json(&request)
-                .send()
-            {
-                Ok(response) => {
-                    return if response.status().is_success() {
-                        response.json().map_err(ModuleKitError::from)
-                    } else {
-                        let text = response.text().unwrap_or_else(|_| "unknown error".into());
-                        Err(ModuleKitError::TokenExchange(text))
-                    };
-                }
-                Err(err) => {
-                    attempts += 1;
-                    if attempts > self.retries {
-                        return Err(ModuleKitError::Http(err));
-                    }
-                    let delay = self.backoff.saturating_mul(attempts);
-                    std::thread::sleep(delay);
-                }
-            }
-        }
-    }
-}
-
-fn ensure_trailing_slash(mut url: Url) -> Url {
-    if !url.path().ends_with('/') {
-        let mut path = url.path().to_string();
-        if !path.ends_with('/') {
-            path.push('/');
-        }
-        url.set_path(&path);
-    }
-    url
 }

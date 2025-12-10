@@ -3,13 +3,20 @@ use std::env::VarError;
 use std::time::Duration;
 
 use url::Url;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use crate::connector::ConnectorEndpoint;
+use crate::control_plane::ControlPlaneClient;
 use crate::error::ModuleKitError;
+use crate::token_provider::{ServiceTokenLease, ServiceTokenProvider};
 
 const ENV_MODULE_ID: &str = "FENRIR_MODULE_ID";
 const ENV_SERVICE_ID: &str = "FENRIR_SERVICE_ID";
 const ENV_SERVICE_TOKEN: &str = "FENRIR_SERVICE_TOKEN";
+const ENV_SERVICE_TOKEN_ISSUED_AT: &str = "FENRIR_SERVICE_TOKEN_ISSUED_AT";
+const ENV_SERVICE_TOKEN_EXPIRES_AT: &str = "FENRIR_SERVICE_TOKEN_EXPIRES_AT";
+const ENV_SERVICE_TOKEN_TTL_SECS: &str = "FENRIR_SERVICE_TOKEN_TTL_SECS";
 const ENV_CONNECTOR_URI: &str = "FENRIR_DB_CONNECTOR_URI";
 const ENV_CONNECTOR_PROTOCOL: &str = "FENRIR_DB_CONNECTOR_PROTOCOL";
 const ENV_CONNECTOR_ENDPOINT: &str = "FENRIR_DB_CONNECTOR_ENDPOINT";
@@ -38,6 +45,26 @@ fn optional_env(name: &'static str) -> Result<Option<String>, ModuleKitError> {
         Ok(_) => Ok(None),
         Err(VarError::NotPresent) => Ok(None),
         Err(err) => Err(ModuleKitError::invalid_env(name, err)),
+    }
+}
+
+fn optional_timestamp_env(
+    name: &'static str,
+) -> Result<Option<OffsetDateTime>, ModuleKitError> {
+    match optional_env(name)? {
+        Some(value) => OffsetDateTime::parse(value.trim(), &Rfc3339)
+            .map(Some)
+            .map_err(|err| ModuleKitError::invalid_env_value(name, err.to_string())),
+        None => Ok(None),
+    }
+}
+
+fn optional_u64_env(name: &'static str) -> Result<Option<u64>, ModuleKitError> {
+    match optional_env(name)? {
+        Some(value) => value.trim().parse::<u64>().map(Some).map_err(|_| {
+            ModuleKitError::invalid_env_value(name, format!("expected integer, got '{value}'"))
+        }),
+        None => Ok(None),
     }
 }
 
@@ -81,6 +108,7 @@ pub struct ModuleEnvironment {
     pub service_token: String,
     pub connector: ConnectorEndpoint,
     pub control_plane: ControlPlaneEnvironment,
+    pub service_token_lease: ServiceTokenLease,
 }
 
 impl ModuleEnvironment {
@@ -88,6 +116,9 @@ impl ModuleEnvironment {
         let module_id = read_env(ENV_MODULE_ID)?;
         let service_id = read_env(ENV_SERVICE_ID)?;
         let service_token = read_env(ENV_SERVICE_TOKEN)?;
+        let issued_at = optional_timestamp_env(ENV_SERVICE_TOKEN_ISSUED_AT)?;
+        let expires_at = optional_timestamp_env(ENV_SERVICE_TOKEN_EXPIRES_AT)?;
+        let ttl_seconds = optional_u64_env(ENV_SERVICE_TOKEN_TTL_SECS)?;
         let connector_uri = match optional_env(ENV_CONNECTOR_URI)? {
             Some(uri) => uri,
             None => {
@@ -101,13 +132,31 @@ impl ModuleEnvironment {
             .map(|value| Url::parse(value.trim()))
             .transpose()?;
         let control_plane = ControlPlaneEnvironment::from_env(control_plane_url)?;
+        let token_lease = ServiceTokenLease::new(
+            service_token.clone(),
+            issued_at,
+            expires_at,
+            ttl_seconds,
+        );
         Ok(Self {
             module_id,
             service_id,
             service_token,
             connector,
             control_plane,
+            service_token_lease: token_lease,
         })
+    }
+
+    pub fn token_provider(&self) -> Result<ServiceTokenProvider, ModuleKitError> {
+        let client = match &self.control_plane.url {
+            Some(_) => Some(ControlPlaneClient::new(&self.control_plane)?),
+            None => None,
+        };
+        Ok(ServiceTokenProvider::new(
+            self.service_token_lease.clone(),
+            client,
+        ))
     }
 }
 
