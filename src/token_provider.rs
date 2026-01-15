@@ -234,7 +234,7 @@ fn next_refresh_wait(lease: &Arc<Mutex<ServiceTokenLease>>, refresh_lead: Durati
                 if remaining <= refresh_lead {
                     Duration::seconds(AUTO_REFRESH_MIN_SLEEP_SECS)
                 } else {
-                    remaining - refresh_lead
+                    (remaining - refresh_lead).min(fallback)
                 }
             }
             None => fallback,
