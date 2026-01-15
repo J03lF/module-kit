@@ -164,7 +164,6 @@ impl DbConnectorIntent {
 
     pub fn detect(statement: &str) -> Self {
         let keyword = statement
-            .trim_start()
             .split_whitespace()
             .next()
             .map(|word| word.to_ascii_lowercase())

@@ -90,7 +90,7 @@ fn read_bool_env(name: &'static str, default: bool) -> Result<bool, ModuleKitErr
         Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" => Ok(true),
             "0" | "false" | "no" => Ok(false),
-            other if other.is_empty() => Ok(default),
+            "" => Ok(default),
             other => Err(ModuleKitError::invalid_env_value(
                 name,
                 format!("expected boolean, got '{other}'"),
