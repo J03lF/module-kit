@@ -6,6 +6,12 @@ use serde::{Deserialize, Serialize};
 pub struct ModuleReportedServices {
     pub module_id: String,
     #[serde(default)]
+    pub schema_version: Option<String>,
+    #[serde(default)]
+    pub signed_at: Option<String>,
+    #[serde(default)]
+    pub signature: Option<String>,
+    #[serde(default)]
     pub services: Vec<ModuleServiceDescriptor>,
 }
 
@@ -13,6 +19,9 @@ impl ModuleReportedServices {
     pub fn new(module_id: impl Into<String>) -> Self {
         Self {
             module_id: module_id.into(),
+            schema_version: None,
+            signed_at: None,
+            signature: None,
             services: Vec::new(),
         }
     }
@@ -25,12 +34,36 @@ impl ModuleReportedServices {
     pub fn push(&mut self, descriptor: ModuleServiceDescriptor) {
         self.services.push(descriptor);
     }
+
+    pub fn sign_with_token(&mut self, token: &str) -> Result<(), crate::error::ModuleKitError> {
+        let signed_at = time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .map_err(|err| crate::error::ModuleKitError::ManifestSign(err.to_string()))?;
+        let schema_version = self
+            .schema_version
+            .clone()
+            .unwrap_or_else(|| "1.0".to_string());
+        let payload = ServiceManifestSignaturePayload {
+            module_id: self.module_id.clone(),
+            schema_version: schema_version.clone(),
+            signed_at: signed_at.clone(),
+            services: self.services.clone(),
+        };
+        let data = serde_json::to_vec(&payload)?;
+        let signature = sign_manifest_payload(token, &data);
+        self.schema_version = Some(schema_version);
+        self.signed_at = Some(signed_at);
+        self.signature = Some(signature);
+        Ok(())
+    }
 }
 
 /// Service descriptor representation that matches Fenrir's runtime schema.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModuleServiceDescriptor {
     pub service_id: String,
+    #[serde(default)]
+    pub profile: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -78,6 +111,11 @@ impl ModuleServiceDescriptorBuilder {
 
     pub fn name(mut self, value: impl Into<String>) -> Self {
         self.inner.name = Some(value.into());
+        self
+    }
+
+    pub fn profile(mut self, value: impl Into<String>) -> Self {
+        self.inner.profile = Some(value.into());
         self
     }
 
@@ -155,4 +193,25 @@ impl ModuleServiceDescriptorBuilder {
         }
         self.inner
     }
+}
+
+#[derive(Debug, Serialize)]
+struct ServiceManifestSignaturePayload {
+    module_id: String,
+    schema_version: String,
+    signed_at: String,
+    services: Vec<ModuleServiceDescriptor>,
+}
+
+fn sign_manifest_payload(token: &str, payload: &[u8]) -> String {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(token.as_bytes())
+        .expect("hmac key length is valid");
+    mac.update(payload);
+    let bytes = mac.finalize().into_bytes();
+    STANDARD.encode(bytes)
 }

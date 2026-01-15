@@ -7,6 +7,7 @@ use std::time::Duration as StdDuration;
 
 use crate::control_plane::ControlPlaneClient;
 use crate::error::ModuleKitError;
+use crate::service::ModuleReportedServices;
 use crate::tokens::{ModuleTokenExchangeRequest, ModuleTokenExchangeResponse};
 use time::Duration;
 use time::OffsetDateTime;
@@ -129,6 +130,19 @@ impl ServiceTokenProvider {
             .as_ref()
             .ok_or(ModuleKitError::ControlPlaneMissing)?;
         client.exchange_token(&bearer, request)
+    }
+
+    pub fn publish_services(
+        &self,
+        payload: &mut ModuleReportedServices,
+    ) -> Result<(), ModuleKitError> {
+        let bearer = self.current_token()?;
+        let client = self
+            .control_plane
+            .as_ref()
+            .ok_or(ModuleKitError::ControlPlaneMissing)?;
+        payload.sign_with_token(&bearer)?;
+        client.publish_services(&bearer, payload)
     }
 
     fn refresh_default_token(&self, bearer: String) -> Result<(), ModuleKitError> {

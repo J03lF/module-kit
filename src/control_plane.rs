@@ -8,13 +8,16 @@ use url::Url;
 
 use crate::env::ControlPlaneEnvironment;
 use crate::error::ModuleKitError;
+use crate::service::ModuleReportedServices;
 use crate::tokens::{ModuleTokenExchangeRequest, ModuleTokenExchangeResponse};
 
 const TOKEN_ENDPOINT_PATH: &str = "modules/runtime/tokens";
+const SERVICES_ENDPOINT_PATH: &str = "modules/runtime/services";
 
 #[derive(Clone)]
 pub(crate) struct ControlPlaneClient {
     token_url: Url,
+    services_url: Url,
     http: BlockingClient,
     retries: u32,
     backoff: Duration,
@@ -29,6 +32,9 @@ impl ControlPlaneClient {
         let normalized = ensure_trailing_slash(base_url);
         let token_url = normalized
             .join(TOKEN_ENDPOINT_PATH)
+            .map_err(ModuleKitError::ControlPlaneUrl)?;
+        let services_url = normalized
+            .join(SERVICES_ENDPOINT_PATH)
             .map_err(ModuleKitError::ControlPlaneUrl)?;
         let mut builder = BlockingClient::builder().timeout(env.timeout);
         if env.tls.accept_invalid_certs {
@@ -62,6 +68,7 @@ impl ControlPlaneClient {
         let client = builder.build()?;
         Ok(Self {
             token_url,
+            services_url,
             http: client,
             retries: env.retries,
             backoff: env.backoff,
@@ -89,6 +96,39 @@ impl ControlPlaneClient {
                         let text = response.text().unwrap_or_else(|_| "unknown error".into());
                         Err(ModuleKitError::TokenExchange(text))
                     };
+                }
+                Err(err) => {
+                    attempts += 1;
+                    if attempts > self.retries {
+                        return Err(ModuleKitError::Http(err));
+                    }
+                    let delay = self.backoff.saturating_mul(attempts);
+                    sleep(delay);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn publish_services(
+        &self,
+        bearer: &str,
+        payload: &ModuleReportedServices,
+    ) -> Result<(), ModuleKitError> {
+        let mut attempts = 0;
+        loop {
+            match self
+                .http
+                .post(self.services_url.clone())
+                .bearer_auth(bearer)
+                .json(payload)
+                .send()
+            {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        return Ok(());
+                    }
+                    let text = response.text().unwrap_or_else(|_| "unknown error".into());
+                    return Err(ModuleKitError::ServicePublish(text));
                 }
                 Err(err) => {
                     attempts += 1;

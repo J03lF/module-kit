@@ -29,6 +29,10 @@ pub enum ModuleKitError {
     ControlPlaneMissing,
     #[error("token exchange rejected: {0}")]
     TokenExchange(String),
+    #[error("service manifest signing failed: {0}")]
+    ManifestSign(String),
+    #[error("service manifest publish rejected: {0}")]
+    ServicePublish(String),
     #[error("tls error: {0}")]
     Tls(String),
 }
