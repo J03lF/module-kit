@@ -35,6 +35,10 @@ pub enum ModuleKitError {
     ServicePublish(String),
     #[error("tls error: {0}")]
     Tls(String),
+    #[error("gateway request failed (status {status}): {error}")]
+    GatewayRequestFailed { status: u16, error: String },
+    #[error("gateway response invalid: {0}")]
+    GatewayResponse(String),
 }
 
 impl ModuleKitError {

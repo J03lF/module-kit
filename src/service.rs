@@ -59,6 +59,8 @@ impl ModuleReportedServices {
 }
 
 /// Service descriptor representation that matches Fenrir's runtime schema.
+/// IMPORTANT: Field order must match Fenrir's ReportedServiceEntry exactly
+/// for HMAC signature verification to work correctly.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModuleServiceDescriptor {
     pub service_id: String,
@@ -70,6 +72,8 @@ pub struct ModuleServiceDescriptor {
     pub description: Option<String>,
     #[serde(default)]
     pub kind: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     #[serde(default)]
     pub route_prefix: Option<String>,
     #[serde(default)]
@@ -84,8 +88,6 @@ pub struct ModuleServiceDescriptor {
     pub required_scopes: Vec<String>,
     #[serde(default)]
     pub allowed_roles: Vec<String>,
-    #[serde(default)]
-    pub tags: Vec<String>,
 }
 
 impl ModuleServiceDescriptor {
