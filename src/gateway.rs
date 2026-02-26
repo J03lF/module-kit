@@ -186,7 +186,6 @@ impl GatewayBody {
 
 #[derive(Debug, Deserialize)]
 struct GatewayErrorResponse {
-    pub audit_id: String,
     pub status: u16,
     pub error: String,
 }
