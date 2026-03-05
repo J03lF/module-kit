@@ -165,12 +165,16 @@ pub enum GatewayBody {
     Json(serde_json::Value),
     Text(String),
     Base64(String),
+    RawJson(Box<serde_json::value::RawValue>),
 }
 
 impl GatewayBody {
     pub fn into_json<T: DeserializeOwned>(self) -> Result<T, ModuleKitError> {
         match self {
             GatewayBody::Json(value) => serde_json::from_value(value).map_err(ModuleKitError::from),
+            GatewayBody::RawJson(raw) => {
+                serde_json::from_str(raw.get()).map_err(ModuleKitError::from)
+            }
             GatewayBody::Empty => Err(ModuleKitError::GatewayResponse(
                 "gateway response body was empty".to_string(),
             )),
