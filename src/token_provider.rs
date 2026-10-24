@@ -120,6 +120,17 @@ impl ServiceTokenProvider {
         Ok(self.lease.lock().unwrap().token.clone())
     }
 
+    /// The current token when it needs no refresh, without blocking; `None`
+    /// when [`Self::current_token`] would have to refresh it first.
+    pub fn token_if_fresh(&self) -> Option<String> {
+        let lease = self.lease.lock().ok()?;
+        if self.control_plane.is_none() || !lease.should_refresh(self.refresh_lead) {
+            Some(lease.token.clone())
+        } else {
+            None
+        }
+    }
+
     pub fn issue_scoped_token(
         &self,
         request: ModuleTokenExchangeRequest,
