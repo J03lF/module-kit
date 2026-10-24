@@ -2,9 +2,9 @@ use std::env;
 use std::env::VarError;
 use std::time::Duration;
 
-use url::Url;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use url::Url;
 
 use crate::connector::ConnectorEndpoint;
 use crate::control_plane::ControlPlaneClient;
@@ -48,9 +48,7 @@ fn optional_env(name: &'static str) -> Result<Option<String>, ModuleKitError> {
     }
 }
 
-fn optional_timestamp_env(
-    name: &'static str,
-) -> Result<Option<OffsetDateTime>, ModuleKitError> {
+fn optional_timestamp_env(name: &'static str) -> Result<Option<OffsetDateTime>, ModuleKitError> {
     match optional_env(name)? {
         Some(value) => OffsetDateTime::parse(value.trim(), &Rfc3339)
             .map(Some)
@@ -132,12 +130,8 @@ impl ModuleEnvironment {
             .map(|value| Url::parse(value.trim()))
             .transpose()?;
         let control_plane = ControlPlaneEnvironment::from_env(control_plane_url)?;
-        let token_lease = ServiceTokenLease::new(
-            service_token.clone(),
-            issued_at,
-            expires_at,
-            ttl_seconds,
-        );
+        let token_lease =
+            ServiceTokenLease::new(service_token.clone(), issued_at, expires_at, ttl_seconds);
         Ok(Self {
             module_id,
             service_id,

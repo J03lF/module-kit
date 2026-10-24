@@ -211,8 +211,8 @@ fn sign_manifest_payload(token: &str, payload: &[u8]) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
 
-    let mut mac = Hmac::<Sha256>::new_from_slice(token.as_bytes())
-        .expect("hmac key length is valid");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(token.as_bytes()).expect("hmac key length is valid");
     mac.update(payload);
     let bytes = mac.finalize().into_bytes();
     STANDARD.encode(bytes)

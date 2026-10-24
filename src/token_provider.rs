@@ -91,9 +91,9 @@ impl ServiceTokenProvider {
         let lease = Arc::new(Mutex::new(initial));
         let control_plane = control_plane.map(Arc::new);
         let refresh_lead = Duration::seconds(TOKEN_REFRESH_LEAD_SECS);
-        let auto_refresh = control_plane
-            .as_ref()
-            .map(|client| AutoRefreshHandle::start(Arc::clone(&lease), Arc::clone(client), refresh_lead));
+        let auto_refresh = control_plane.as_ref().map(|client| {
+            AutoRefreshHandle::start(Arc::clone(&lease), Arc::clone(client), refresh_lead)
+        });
         Self {
             lease,
             control_plane,

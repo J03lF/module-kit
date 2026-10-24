@@ -61,7 +61,10 @@ impl GatewayClient {
         }
 
         let text = String::from_utf8_lossy(&payload).to_string();
-        Err(ModuleKitError::GatewayRequestFailed { status: status.as_u16(), error: text })
+        Err(ModuleKitError::GatewayRequestFailed {
+            status: status.as_u16(),
+            error: text,
+        })
     }
 
     pub async fn call_json<T: DeserializeOwned>(

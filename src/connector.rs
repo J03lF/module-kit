@@ -11,8 +11,8 @@ use serde_json::Value as JsonValue;
 
 use crate::env::ModuleEnvironment;
 use crate::error::ModuleKitError;
-use crate::tokens::ModuleTokenExchangeRequest;
 use crate::token_provider::ServiceTokenProvider;
+use crate::tokens::ModuleTokenExchangeRequest;
 
 const CONNECTOR_TIMEOUT: Duration = Duration::from_secs(15);
 const WRITE_TOKEN_SAFETY_SECONDS: u64 = 5;
@@ -131,30 +131,20 @@ pub struct DbTenantPolicy {
     pub mode: DbTenantBindingMode,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DbTenantBindingMode {
+    #[default]
     Inject,
     RequireMatch,
 }
 
-impl Default for DbTenantBindingMode {
-    fn default() -> Self {
-        Self::Inject
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DbConnectorIntent {
+    #[default]
     Read,
     Write,
-}
-
-impl Default for DbConnectorIntent {
-    fn default() -> Self {
-        Self::Read
-    }
 }
 
 impl DbConnectorIntent {
