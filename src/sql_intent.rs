@@ -473,17 +473,17 @@ mod tests {
     fn plain_reads_are_reads() {
         for sql in [
             "SELECT 1",
-            "select * from athene_tickets where id = $1::uuid",
+            "select * from athenos_tickets where id = $1::uuid",
             "  (SELECT a FROM t) UNION (SELECT b FROM u)",
             "WITH x AS (SELECT id FROM t) SELECT * FROM x",
             "WITH RECURSIVE r(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM r WHERE n < 5) SELECT n FROM r",
             "VALUES (1), (2)",
-            "TABLE athene_projects",
+            "TABLE athenos_projects",
             "SHOW search_path",
             "EXPLAIN SELECT 1",
             "SELECT 1; SELECT 2;",
             "SELECT CASE WHEN a THEN 1 ELSE 2 END AS updated_at FROM t",
-            "SELECT count(*) FROM athene_ticket_comments c WHERE c.deleted_at IS NULL",
+            "SELECT count(*) FROM athenos_ticket_comments c WHERE c.deleted_at IS NULL",
             "SELECT id FROM t WHERE title ILIKE '%' || $1 || '%'",
         ] {
             assert!(is_read(sql), "{sql}");
@@ -516,7 +516,7 @@ mod tests {
             "SELECT set_config('search_path', 'evil', false)",
             "SELECT pg_catalog.set_config('search_path', 'evil', false)",
             "SELECT \"set_config\"('search_path', 'evil', false)",
-            "SELECT nextval('athene_seq')",
+            "SELECT nextval('athenos_seq')",
             "SELECT pg_advisory_lock(42)",
             "SELECT dblink_exec('dbname=x', 'DELETE FROM t')",
             "SELECT pg_terminate_backend(123)",
