@@ -13,6 +13,7 @@ use serde_json::Value as JsonValue;
 
 use crate::env::ModuleEnvironment;
 use crate::error::ModuleKitError;
+use crate::redact::Redacted;
 use crate::token_provider::ServiceTokenProvider;
 use crate::tokens::ModuleTokenExchangeRequest;
 
@@ -113,7 +114,7 @@ impl ConnectorEndpoint {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DbConnectorRequest {
     pub token: String,
     #[serde(default)]
@@ -123,6 +124,18 @@ pub struct DbConnectorRequest {
     pub command: DbConnectorCommand,
     #[serde(default)]
     pub tenant: Option<DbTenantPolicy>,
+}
+
+impl std::fmt::Debug for DbConnectorRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DbConnectorRequest")
+            .field("token", &Redacted)
+            .field("engine", &self.engine)
+            .field("intent", &self.intent)
+            .field("command", &self.command)
+            .field("tenant", &self.tenant)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -304,6 +317,13 @@ impl DbConnectorClient {
     /// Whether this client keeps framed connections to the host.
     pub fn is_framed(&self) -> bool {
         self.framed
+    }
+
+    /// The provider of the module token, e.g. to report
+    /// [`ServiceTokenProvider::refresh_health`] on `/health`, set a refresh
+    /// hook, or install a new token after the old one was refused.
+    pub fn token_provider(&self) -> &ServiceTokenProvider {
+        &self.tokens
     }
 
     /// Blocking call over a fresh connection (legacy protocol).

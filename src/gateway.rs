@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::time::Duration;
 
 use reqwest::Client;
@@ -6,6 +7,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ModuleKitError;
+use crate::redact::RedactedHeaders;
 
 const ENV_GATEWAY_ENDPOINT: &str = "FENRIR_GATEWAY_ENDPOINT";
 const DEFAULT_GATEWAY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -83,7 +85,7 @@ impl GatewayClient {
 }
 
 /// Gateway request payload for `POST FENRIR_GATEWAY_ENDPOINT`.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct GatewayRequest {
     pub target: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,6 +99,21 @@ pub struct GatewayRequest {
     pub query: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+}
+
+// Manual Debug: modules send the service token in `headers`.
+impl fmt::Debug for GatewayRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayRequest")
+            .field("target", &self.target)
+            .field("verb", &self.verb)
+            .field("path", &self.path)
+            .field("body", &self.body)
+            .field("headers", &RedactedHeaders(&self.headers))
+            .field("query", &self.query)
+            .field("timeout_ms", &self.timeout_ms)
+            .finish()
+    }
 }
 
 impl GatewayRequest {
@@ -144,7 +161,7 @@ impl GatewayRequest {
 }
 
 /// Gateway response payload returned by the runtime gateway.
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct GatewayResponsePayload {
     pub status: u16,
     pub audit_id: String,
@@ -152,13 +169,35 @@ pub struct GatewayResponsePayload {
     pub body: GatewayBody,
 }
 
+// Manual Debug: response headers can carry `set-cookie` and tokens.
+impl fmt::Debug for GatewayResponsePayload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayResponsePayload")
+            .field("status", &self.status)
+            .field("audit_id", &self.audit_id)
+            .field("headers", &RedactedHeaders(&self.headers))
+            .field("body", &self.body)
+            .finish()
+    }
+}
+
 /// Typed response wrapper for JSON payloads.
-#[derive(Debug)]
 pub struct GatewayResponse<T> {
     pub status: u16,
     pub audit_id: String,
     pub headers: HashMap<String, String>,
     pub body: T,
+}
+
+impl<T: fmt::Debug> fmt::Debug for GatewayResponse<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayResponse")
+            .field("status", &self.status)
+            .field("audit_id", &self.audit_id)
+            .field("headers", &RedactedHeaders(&self.headers))
+            .field("body", &self.body)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,4 +234,74 @@ impl GatewayBody {
 struct GatewayErrorResponse {
     pub status: u16,
     pub error: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sensitive_headers() -> HashMap<String, String> {
+        [
+            ("X-Fenrir-Service-Token", "Bearer s3cret-a"),
+            ("Authorization", "Bearer s3cret-b"),
+            ("proxy-authorization", "Basic s3cret-c"),
+            ("Cookie", "sid=s3cret-d"),
+            ("SET-COOKIE", "sid=s3cret-e; HttpOnly"),
+            ("x-refresh-token", "s3cret-f"),
+            ("content-type", "application/json"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+    }
+
+    fn assert_redacted(debug: &str) {
+        assert!(!debug.contains("s3cret"), "secret leaked: {debug}");
+        assert!(debug.contains("X-Fenrir-Service-Token"));
+        assert!(debug.contains("<redacted>"));
+        // Harmless headers stay readable for debugging.
+        assert!(debug.contains("application/json"));
+    }
+
+    #[test]
+    fn request_debug_redacts_service_token_header() {
+        let request = GatewayRequest::new("athenos.notifications")
+            .path("/v1/notify")
+            .header("x-fenrir-service-token", "Bearer s3cret");
+        let debug = format!("{request:?}");
+        assert!(!debug.contains("s3cret"), "secret leaked: {debug}");
+        assert!(debug.contains("x-fenrir-service-token"));
+        assert!(debug.contains("/v1/notify"));
+    }
+
+    #[test]
+    fn request_debug_redacts_all_credential_headers_case_insensitively() {
+        let mut request = GatewayRequest::new("svc");
+        request.headers = sensitive_headers();
+        assert_redacted(&format!("{request:?}"));
+    }
+
+    #[test]
+    fn response_payload_debug_redacts_credential_headers() {
+        let payload = GatewayResponsePayload {
+            status: 200,
+            audit_id: "audit-1".to_string(),
+            headers: sensitive_headers(),
+            body: GatewayBody::Empty,
+        };
+        assert_redacted(&format!("{payload:?}"));
+    }
+
+    #[test]
+    fn typed_response_debug_redacts_credential_headers() {
+        let response = GatewayResponse {
+            status: 200,
+            audit_id: "audit-1".to_string(),
+            headers: sensitive_headers(),
+            body: serde_json::json!({"ok": true}),
+        };
+        let debug = format!("{response:?}");
+        assert_redacted(&debug);
+        assert!(debug.contains("audit-1"));
+    }
 }

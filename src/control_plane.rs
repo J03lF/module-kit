@@ -14,6 +14,13 @@ use crate::tokens::{ModuleTokenExchangeRequest, ModuleTokenExchangeResponse};
 const TOKEN_ENDPOINT_PATH: &str = "modules/runtime/tokens";
 const SERVICES_ENDPOINT_PATH: &str = "modules/runtime/services";
 
+/// A failed token exchange; `status` is set when the control plane answered.
+#[derive(Debug)]
+pub(crate) struct ExchangeFailure {
+    pub(crate) status: Option<u16>,
+    pub(crate) error: ModuleKitError,
+}
+
 #[derive(Clone)]
 pub(crate) struct ControlPlaneClient {
     token_url: Url,
@@ -80,6 +87,17 @@ impl ControlPlaneClient {
         bearer: &str,
         request: ModuleTokenExchangeRequest,
     ) -> Result<ModuleTokenExchangeResponse, ModuleKitError> {
+        self.exchange_token_classified(bearer, request)
+            .map_err(|failure| failure.error)
+    }
+
+    /// Like [`Self::exchange_token`], but keeps the HTTP status of a refused
+    /// exchange so the auto-refresh can tell a dead token from an outage.
+    pub(crate) fn exchange_token_classified(
+        &self,
+        bearer: &str,
+        request: ModuleTokenExchangeRequest,
+    ) -> Result<ModuleTokenExchangeResponse, ExchangeFailure> {
         let mut attempts = 0;
         loop {
             match self
@@ -90,17 +108,27 @@ impl ControlPlaneClient {
                 .send()
             {
                 Ok(response) => {
-                    return if response.status().is_success() {
-                        response.json().map_err(ModuleKitError::from)
+                    let status = response.status();
+                    return if status.is_success() {
+                        response.json().map_err(|err| ExchangeFailure {
+                            status: Some(status.as_u16()),
+                            error: ModuleKitError::from(err),
+                        })
                     } else {
                         let text = response.text().unwrap_or_else(|_| "unknown error".into());
-                        Err(ModuleKitError::TokenExchange(text))
+                        Err(ExchangeFailure {
+                            status: Some(status.as_u16()),
+                            error: ModuleKitError::TokenExchange(text),
+                        })
                     };
                 }
                 Err(err) => {
                     attempts += 1;
                     if attempts > self.retries {
-                        return Err(ModuleKitError::Http(err));
+                        return Err(ExchangeFailure {
+                            status: None,
+                            error: ModuleKitError::Http(err),
+                        });
                     }
                     let delay = self.backoff.saturating_mul(attempts);
                     sleep(delay);

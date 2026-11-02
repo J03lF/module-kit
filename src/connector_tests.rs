@@ -370,3 +370,17 @@ async fn legacy_mode_works_against_a_one_shot_host() {
     assert_eq!(connections.load(Ordering::SeqCst), 4);
     task.abort();
 }
+
+#[test]
+fn debug_of_a_request_hides_the_token() {
+    let request = DbConnectorRequest {
+        token: "db-secret-1234".to_string(),
+        engine: Some("postgres".to_string()),
+        intent: Some(DbConnectorIntent::Read),
+        command: read_cmd("SELECT 1"),
+        tenant: None,
+    };
+    let shown = format!("{request:?} {request:#?}");
+    assert!(!shown.contains("db-secret-1234"), "{shown}");
+    assert!(shown.contains("SELECT 1"), "{shown}");
+}

@@ -3,6 +3,7 @@ mod control_plane;
 pub mod env;
 pub mod error;
 pub mod gateway;
+mod redact;
 pub mod service;
 pub mod sql_intent;
 pub mod token_provider;

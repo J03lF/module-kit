@@ -1,5 +1,6 @@
 use std::env;
 use std::env::VarError;
+use std::fmt;
 use std::time::Duration;
 
 use time::format_description::well_known::Rfc3339;
@@ -9,6 +10,7 @@ use url::Url;
 use crate::connector::ConnectorEndpoint;
 use crate::control_plane::ControlPlaneClient;
 use crate::error::ModuleKitError;
+use crate::redact::Redacted;
 use crate::token_provider::{ServiceTokenLease, ServiceTokenProvider};
 
 const ENV_MODULE_ID: &str = "FENRIR_MODULE_ID";
@@ -99,7 +101,7 @@ fn read_bool_env(name: &'static str, default: bool) -> Result<bool, ModuleKitErr
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ModuleEnvironment {
     pub module_id: String,
     pub service_id: String,
@@ -107,6 +109,19 @@ pub struct ModuleEnvironment {
     pub connector: ConnectorEndpoint,
     pub control_plane: ControlPlaneEnvironment,
     pub service_token_lease: ServiceTokenLease,
+}
+
+impl fmt::Debug for ModuleEnvironment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ModuleEnvironment")
+            .field("module_id", &self.module_id)
+            .field("service_id", &self.service_id)
+            .field("service_token", &Redacted)
+            .field("connector", &self.connector)
+            .field("control_plane", &self.control_plane)
+            .field("service_token_lease", &self.service_token_lease)
+            .finish()
+    }
 }
 
 impl ModuleEnvironment {
@@ -191,5 +206,35 @@ impl ControlPlaneTlsEnvironment {
             client_key_path: optional_env(ENV_CONTROL_PLANE_TLS_CLIENT_KEY)?,
             accept_invalid_certs: read_bool_env(ENV_CONTROL_PLANE_TLS_ACCEPT_INVALID, false)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_of_the_environment_hides_the_service_token() {
+        let token = "svc-secret-0815";
+        let env = ModuleEnvironment {
+            module_id: "m".to_string(),
+            service_id: "s".to_string(),
+            service_token: token.to_string(),
+            connector: ConnectorEndpoint::Tcp {
+                addr: "127.0.0.1:1".to_string(),
+            },
+            control_plane: ControlPlaneEnvironment {
+                url: None,
+                timeout: Duration::from_millis(1),
+                retries: 0,
+                backoff: Duration::from_millis(1),
+                tls: ControlPlaneTlsEnvironment::default(),
+            },
+            service_token_lease: ServiceTokenLease::new(token, None, None, Some(60)),
+        };
+        let shown = format!("{env:?} {env:#?}");
+        assert!(!shown.contains(token), "{shown}");
+        assert!(shown.contains("service_token"), "{shown}");
+        assert!(shown.contains("127.0.0.1:1"), "{shown}");
     }
 }
